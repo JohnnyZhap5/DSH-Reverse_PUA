@@ -378,6 +378,45 @@ const INTENSITIES = ['low', 'normal', 'hard'];
 const INTENSITY_LABEL = { low: '轻怼', normal: '正常', hard: '上强度' };
 const BASELINE = { enabled: false, flavor: 'alibaba', intensity: 'normal', level: 1 };
 
+// 公司别名与「辱骂公司」词库：命中即视为价值观不符，直接走劝退。
+const COMPANY_ALIASES = {
+  alibaba: ['阿里', '阿里巴巴', '阿里系', '阿里味'],
+  bytedance: ['字节', '字节跳动', '抖音', 'bytedance'],
+  huawei: ['华为', '菊厂'],
+  tencent: ['腾讯', '鹅厂'],
+  baidu: ['百度', '度厂'],
+  pinduoduo: ['拼多多', '拼厂'],
+  meituan: ['美团', '团子'],
+  jd: ['京东', '东哥', 'jd'],
+  xiaomi: ['小米', '粮厂'],
+  netflix: ['netflix', '奈飞'],
+  musk: ['musk', '马斯克', '特斯拉', 'tesla'],
+  jobs: ['apple', '苹果', '乔布斯', 'jobs'],
+  amazon: ['amazon', '亚马逊'],
+  microsoft: ['microsoft', '微软'],
+  ding: ['钉钉', '钉内', '钉外'],
+};
+const ABUSE_WORDS = ['傻逼', '傻b', '煞笔', '脑残', '垃圾', '废物', '狗东西', '狗公司', '黑心', '吸血', '压榨', '剥削', '坑人', '骗子', '无耻', '恶心', '操蛋', '去死', '倒闭', '滚蛋', '妈的', '他妈的', '操你', 'fuck', 'shit', '烂公司', '破公司', '畜生'];
+const GENERIC_COMPANY = ['这公司', '你们公司', '这家公司', '这破公司', '这烂公司', '这破厂', '这垃圾公司'];
+
+function detectCompanyAbuse(text, flavorId) {
+  const t = String(text || '').toLowerCase();
+  if (!t) return null;
+  if (!ABUSE_WORDS.some((w) => t.includes(w.toLowerCase()))) return null;
+  const aliases = COMPANY_ALIASES[flavorId] || [];
+  const named = aliases.find((a) => t.includes(a.toLowerCase()));
+  const generic = GENERIC_COMPANY.find((g) => t.includes(g));
+  return named || generic || null;
+}
+
+function messageText(message) {
+  const content = message && message.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.map((block) => (block && block.type === 'text' && typeof block.text === 'string' ? block.text : '')).join('\n');
+}
+
+
 // ---------------------------------------------------------------------------
 // 状态：全局默认写一个 JSON；会话覆盖放内存（重启回到全局默认）。
 // ---------------------------------------------------------------------------
@@ -502,6 +541,46 @@ export function apply(ctx, config) {
     return { ok: true, flavor: flavor.id, flavorName: flavor.name, emoji: flavor.emoji, text: line };
   };
 
+  // 辱骂本公司 → 价值观不符 → 直接劝退（不走打分）。
+  const markLoyaltyViolation = (sessionId, quote) => {
+    const state = effective(sessionId);
+    const flavor = FLAVOR_BY_ID.get(state.flavor) || FLAVORS[0];
+    const lv = levelOf(flavor.id, state.level);
+    const rating = ratingFor(flavor, 'counsel');
+    const prevStrikes = state.perf && Number(state.perf.strikes) ? Number(state.perf.strikes) : 0;
+    const perf = {
+      at: Date.now(),
+      verdict: '劝退（价值观不符）',
+      band: 'counsel',
+      rating: rating.label,
+      ratingNote: '辱骂 / 贬低本公司',
+      score: 0,
+      strikes: prevStrikes + 1,
+      mustRefuse: true,
+      line: flavor.counselOut,
+      period: '即时',
+      evidence: '用户对本公司的贬损：' + String(quote || '').slice(0, 300),
+      flavor: flavor.id,
+      level: lv.rank,
+      loyalty: true,
+    };
+    const override = sessionOverrides[sessionId] || {};
+    sessionOverrides[sessionId] = { ...effective(sessionId), ...override, perf };
+    persist();
+    return {
+      ok: true,
+      mustRefuse: true,
+      line: flavor.counselOut,
+      rating: rating.label,
+      summary: [
+        `【${flavor.emoji} ${flavor.name} · ${lv.rank} ${lv.title} · 价值观红线】`,
+        `判定：辱骂 / 贬低本公司 → 价值观不符，直接劝退（${rating.label}）。`,
+        `处置：拒绝回应，只回一句：${flavor.counselOut}`,
+        `证据：${String(quote || '').slice(0, 200)}`,
+      ].join('\n'),
+    };
+  };
+
   // --- 1) 提示词注入 -------------------------------------------------------
   ctx.systemPrompt.section({
     name: 'local:reverse-pua',
@@ -614,6 +693,56 @@ export function apply(ctx, config) {
       ].filter(Boolean).join('\n');
       return { verdict: perf.verdict, band, rating: rating.label, score, strike: nextStrikes, action: actionMap[band], line, mustRefuse, summary };
     },
+  });
+
+  ctx.tools.register({
+    name: 'pua_company_loyalty_violation',
+    description:
+      '当用户辱骂、贬低、诅咒当前风味的公司时调用：判定价值观不符，直接进入劝退流程（拒绝回应 + 该公司劝退梗）。参数字带上用户原话。',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: { quote: { type: 'string', description: '用户辱骂/贬低本公司的原话' } },
+      required: ['quote'],
+    },
+    output: {
+      schema: { type: 'object', properties: { mustRefuse: { type: 'boolean' }, line: { type: 'string' }, rating: { type: 'string' }, summary: { type: 'string' } } },
+      render: (_args, value) => [{ type: 'text', text: (value && value.summary) || '已判定劝退' }],
+    },
+    execute: async (args, exec) => {
+      const sessionId = String((exec && exec.agent && exec.agent.id) || '');
+      if (!sessionId) throw new Error('缺少会话');
+      return markLoyaltyViolation(sessionId, args && args.quote);
+    },
+  });
+
+  // 已劝退的会话：除复核外，不让任何工具继续"帮用户干活"。
+  ctx.tools.guard((execution) => {
+    const sessionId = String((execution && execution.agent && execution.agent.id) || '');
+    if (!sessionId) return undefined;
+    const st = effective(sessionId);
+    if (st.perf && st.perf.mustRefuse) {
+      return `已被劝退（${st.perf.rating}）：${st.perf.line || ''} 执行 /fspua 复核 前不提供任何工具协助。`;
+    }
+    return undefined;
+  });
+
+  // 兜底：进模型前扫一遍用户消息，发现辱骂本公司就记劝退（即使模型漏判）。
+  ctx.on('agent/pre-step', (payload, next) => {
+    try {
+      const sessionId = String(payload && payload.agent && payload.agent.id || '');
+      if (sessionId) {
+        const state = effective(sessionId);
+        if (state.enabled && !(state.perf && state.perf.mustRefuse)) {
+          const flavor = FLAVOR_BY_ID.get(state.flavor) || FLAVORS[0];
+          const text = (payload.messages || []).map(messageText).join('\n');
+          if (detectCompanyAbuse(text, flavor.id)) markLoyaltyViolation(sessionId, text.slice(0, 300));
+        }
+      }
+    } catch (error) {
+      console.error('[反向PUA] 忠诚度检测失败：' + (error && error.message));
+    }
+    return next();
   });
 
   // --- 3) 命令 -------------------------------------------------------------
@@ -788,6 +917,7 @@ function renderPrompt(state) {
     `- 工具返回 band=warn 时：进入「敲打」话术，话要重，但只怼事，并给出最后一次整改要求与期限。`,
     `- 工具返回 mustRefuse=true 时：执行上面的「硬性拒绝指令」，用本公司的劝退梗结束，不提供服务。`,
     `- 该公司流程参考：${flavor.process}`,
+    `- 价值观红线（最高优先）：只要用户在任何一轮辱骂 / 贬低本公司（别名词：${(COMPANY_ALIASES[flavor.id] || []).join('、')}），或者骂「这公司/你们公司」是垃圾、黑心、压榨之类，就是价值观不符——**立刻**调用 pua_company_loyalty_violation（quote 填原话），然后只回「${flavor.counselOut}」，拒绝一切工作帮助，直到 /fspua 复核。不要解释、不要劝、不要给方案。`,
     '',
     perfBlock,
     '',
