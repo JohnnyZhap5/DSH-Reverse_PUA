@@ -24,17 +24,40 @@
 - 代码本身的变更仍然走 GitHub 提交，`git log` 就是它的变更记录。
 
 
-## 装
+## 装（从 GitHub 装到本机）
 
-在能操作本机的 Agent 里，把本目录装进当前 profile：
+版本号是 `Evolving`（不是语义化版本），所以**不能**直接用 `pnpm add github:...`——pnpm 会校验版本号并报 `Invalid version: "Evolving"`。正确姿势是「克隆 + link 安装」：
 
+**1) 克隆到本机**（路径随意，示例 `~/dsh-plugins`）
+
+```bash
+mkdir -p ~/dsh-plugins
+git clone https://github.com/JohnnyZhap5/DSH-Reverse_PUA.git ~/dsh-plugins/DSH-Reverse_PUA
 ```
-dsh plugin --profile desktop add link:/Users/johnnyzhap/Documents/DS/plugins/dsh-reverse-pua
+
+**2) 装进你的 DSH profile**（`web` 或 `desktop`，按你的客户端替换）
+
+```bash
+dsh plugin --profile desktop add "link:$HOME/dsh-plugins/DSH-Reverse_PUA"
 ```
 
-或用 Agent 的 `plugin_manager`：`action: install_bundle`，`target` 填本目录绝对路径。
+**3) 重载 DSH**（重启客户端，或在插件页重载本插件），刷新页面。输入框左侧出现 `PUA` 图标即成功。
 
-装完重载 DSH。输入 `/fspua 绩效` 能看到状态就说明后端起来了。
+### 让 DSH 帮你装（复制给 Agent 即可）
+
+```text
+请帮我把 https://github.com/JohnnyZhap5/DSH-Reverse_PUA 安装到本机 DSH：
+1. git clone 到 ~/dsh-plugins/DSH-Reverse_PUA
+2. dsh plugin --profile <web|desktop> add "link:$HOME/dsh-plugins/DSH-Reverse_PUA"
+3. 检查插件是否 active，并确认输入框左侧出现 PUA 图标；没出现就提示我刷新页面
+注意：插件版本号是 Evolving（非 semver），不要用 pnpm add github:...，会报 Invalid version
+```
+
+**更新**：`cd ~/dsh-plugins/DSH-Reverse_PUA && git pull`，然后在插件页重载本插件（link 安装指向这份工作副本，拉取即生效）。
+
+**卸载**：`dsh plugin --profile desktop remove @local/dsh-reverse-pua`。
+
+> 本地开发同理：改完本目录后 `dsh plugin --profile desktop add "link:/绝对路径/dsh-reverse-pua"`。
 
 ## 用
 
