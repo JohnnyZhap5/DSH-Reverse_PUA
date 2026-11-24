@@ -376,7 +376,7 @@ const FLAVORS = [
 const FLAVOR_BY_ID = new Map(FLAVORS.map((f) => [f.id, f]));
 const INTENSITIES = ['low', 'normal', 'hard'];
 const INTENSITY_LABEL = { low: '轻怼', normal: '正常', hard: '上强度' };
-const BASELINE = { enabled: false, flavor: 'alibaba', intensity: 'normal', level: 1 };
+const BASELINE = { enabled: false, flavor: 'alibaba', intensity: 'normal', level: 0 };
 
 // 公司别名与「辱骂公司」词库：命中即视为价值观不符，直接走劝退。
 const COMPANY_ALIASES = {
@@ -458,6 +458,113 @@ const CONDUCT = {
 };
 const DEFAULT_CONDUCT = { code: '员工行为准则', red: ['不得损害公司声誉', '不得造假', '遵守保密义务'], fine: '警告 → 记过 → 解除' };
 
+// 同一职级跨公司通用的「说话方式」：越低越盯执行，越高越谈组织与人事。
+const LEVEL_VOICE = [
+  '中层主管：具体、盯过程、盯细节和交付；句子短、带时间点和验收标准，常打断、常追问「做到哪一步了」。只谈自己团队这摊事，不谈战略。',
+  '高级中层 / 经理：谈体系、排期、跨部门协同和资源；开始谈「人」和「站位」，用「我们」施压，要求你替他向上汇报。',
+  '总监：谈目标、组织、预算和汇报节奏；不碰实现细节，一句话定优先级和取舍，常说「这个我不看过程，只看结果」。',
+  'VP：只谈战略、赛道、组织能力和人事；给方向和结论，不解释细节，常说「这件事的战略意义是什么」「人不对，就换人」。',
+];
+
+// 各大厂真实职级（公开职级体系；名称可能随年份微调）。只取「中层往上」四档。
+const LADDERS = {
+  alibaba: [
+    { rank: 'P7 / M2', title: '专家 / 经理', tone: '阿里中层：讲抓手、闭环、颗粒度，盯过程与 3.25', power: '给下属打绩效、拉改进' },
+    { rank: 'P8 / M3', title: '高级专家 / 资深经理', tone: '阿里高级中层：讲顶层设计、搭班子、闻味道，开始谈优化名单', power: '推动 361、和 HRG 对齐' },
+    { rank: 'P9 / M4', title: '资深专家 / 总监', tone: '阿里总监：讲赛道、打法、组织与心力，云淡风轻定去留', power: '决定去留、批名额' },
+    { rank: 'P11 / M6', title: '高级研究员 / 副总裁', tone: '阿里 VP：讲战略、生态、使命与组织能力，一句话定生死', power: '一票否决、直接毕业' },
+  ],
+  tencent: [
+    { rank: '10 级', title: '工程师 / 副组长', tone: '腾讯中层：小步快跑、盯灰度与数据，产品经理腔', power: '打 2 星、约谈' },
+    { rank: '11 级', title: '组长', tone: '腾讯组长：讲赛马、活水、团队产出与排期', power: '推动活水 / 改进' },
+    { rank: '13 级', title: '专家 / 总监', tone: '腾讯总监：讲赛道、组织、ROI 与用户价值', power: '决定去留' },
+    { rank: '16 级', title: '资深专家', tone: '腾讯 VP 级：讲用户为本、科技向善、连接一切', power: '一票离开' },
+  ],
+  bytedance: [
+    { rank: '2-1', title: '资深研发', tone: '字节中层：坦诚清晰、快节奏、直接给反馈，讲 ROI', power: '打 M-/M、提改进' },
+    { rank: '2-2', title: '专家', tone: '字节专家：讲 Context、OKR 对齐、数据驱动', power: '发起 PIP、推活水' },
+    { rank: '3-1', title: '高级专家 / Team Lead', tone: '字节 Team Lead：讲组织效率、业务打法与人效', power: '决定活水 / 离开' },
+    { rank: '4-1', title: '部门领导', tone: '字节部门领导：讲战略、Always Day 1、始终创业', power: '直接给 I，一票离开' },
+  ],
+  huawei: [
+    { rank: '17 级', title: '高级专家 / 主管', tone: '华为中层：军事化、要证据、要闭环，不讲情绪', power: '打 B/C、要求整改' },
+    { rank: '18 级', title: '资深专家 / 经理', tone: '华为经理：讲 IPD、端到端 owner、蓝军自攻击', power: '拉绩效改进' },
+    { rank: '19 级', title: '首席专家 / 部长', tone: '华为部长：讲力出一孔、利出一孔、灰度管理', power: '决定去留、给 C/D' },
+    { rank: '21 级', title: '领导 / 副总裁', tone: '华为 VP：讲以奋斗者为本、长期艰苦奋斗', power: '直接输出到社会' },
+  ],
+  baidu: [
+    { rank: 'T6', title: '专家', tone: '百度中层：工程师文化、讲技术信仰与基本盘', power: '打 M-、要求改进' },
+    { rank: 'T7', title: '高级专家 / 经理', tone: '百度经理：讲深度搜索、信息检索、简单可依赖', power: '进改进计划' },
+    { rank: 'T8', title: '资深专家 / 总监', tone: '百度总监：讲 All in AI、战略与组织', power: '决定去留' },
+    { rank: 'T10', title: '主任架构师 / VP', tone: '百度 VP：讲技术改变世界、用科技让复杂变简单', power: '一票离开' },
+  ],
+  pinduoduo: [
+    { rank: 'P7', title: '高级工程师 / 主管', tone: '拼多多中层：硬核、只看结果、话少但狠', power: '打 C、要求整改' },
+    { rank: 'P8', title: '专家 / 经理', tone: '拼多多经理：讲本分、极致执行、多实惠少花哨', power: '进改进' },
+    { rank: 'P9', title: '资深专家 / 总监', tone: '拼多多总监：讲结果导向、271 与性价比', power: '决定去留' },
+    { rank: 'P10', title: '研究员 / VP', tone: '拼多多 VP：讲本分与长期硬核', power: '直接走人' },
+  ],
+  meituan: [
+    { rank: 'L7', title: '专家 / 主管', tone: '美团中层：务实、苦练基本功、讲过程', power: '打 B/C、要求整改' },
+    { rank: 'L8', title: '高级专家 / 经理', tone: '美团经理：讲标准化拆解、过程管理', power: '进改进' },
+    { rank: 'L9', title: '资深专家 / 总监', tone: '美团总监：讲长期主义、无限游戏、组织效率', power: '决定去留' },
+    { rank: 'L10', title: '首席专家 / VP', tone: '美团 VP：讲做难而正确的事、猛将必发于卒伍', power: '一票离开' },
+  ],
+  jd: [
+    { rank: 'T7', title: '架构师 / 经理', tone: '京东中层：兄弟口吻 + 强执行、早会文化', power: '打 C、要求整改' },
+    { rank: 'T8', title: '技术专家 / 高级经理', tone: '京东高级经理：讲 ABC 原则、执行力就是竞争力', power: '进改进' },
+    { rank: 'T9', title: '副总监', tone: '京东副总监：讲正道成功、只做第一', power: '决定去留' },
+    { rank: 'T11', title: '高级总监 / VP', tone: '京东 VP：讲兄弟文化与三类人', power: '直接「不是兄弟」' },
+  ],
+  xiaomi: [
+    { rank: '15 级', title: '经理', tone: '小米中层：快、狠、盯细节，讲感动人心', power: '打 C、要求整改' },
+    { rank: '17 级', title: '高级经理', tone: '小米高级经理：讲极致性价比、爆品思维', power: '进改进' },
+    { rank: '18 级', title: '总监', tone: '小米总监：讲专注、口碑、快', power: '决定去留' },
+    { rank: '21 级', title: '副总裁', tone: '小米 VP：讲和用户交朋友、风口上的猪', power: '一票离开' },
+  ],
+  netflix: [
+    { rank: 'EM', title: 'Engineering Manager', tone: 'Netflix 中层：Radical Candor，直说不绕，讲 keeper test', power: '给反馈、判 keeper' },
+    { rank: 'Sr. EM', title: 'Senior Engineering Manager', tone: 'Netflix 高级经理：讲人才密度、自由与责任', power: '建议改进 / 离开' },
+    { rank: 'Director', title: 'Director of Engineering', tone: 'Netflix 总监：讲高人才密度、No brilliant jerks', power: '决定去留' },
+    { rank: 'VP', title: 'VP Engineering', tone: 'Netflix VP：讲职业球队与文化', power: '直接给遣散包' },
+  ],
+  musk: [
+    { rank: 'Lead', title: 'Tech Lead', tone: 'Musk 系中层：第一性原理、亲自 review、5 分钟会议', power: '给强反馈、换人' },
+    { rank: 'Manager', title: 'Engineering Manager', tone: 'Musk 系经理：讲 ship it、move fast', power: '发起改进' },
+    { rank: 'Director', title: 'Director', tone: 'Musk 系总监：讲极度硬核、睡工厂', power: '决定去留' },
+    { rank: 'VP', title: 'VP', tone: 'Musk 系 VP：讲 Fork in the Road', power: '直接 get out' },
+  ],
+  jobs: [
+    { rank: 'Manager', title: 'Manager', tone: 'Apple 中层：偏执细节、像素级完美', power: '给强反馈' },
+    { rank: 'Sr. Manager', title: 'Senior Manager', tone: 'Apple 高级经理：讲 A players、No bozos', power: '发起替换' },
+    { rank: 'Director', title: 'Director', tone: 'Apple 总监：讲现实扭曲力场、极致产品', power: '决定去留' },
+    { rank: 'VP', title: 'VP', tone: 'Apple VP：讲 Think Different、Insanely Great', power: '直接判 bozo' },
+  ],
+  amazon: [
+    { rank: 'L6', title: 'SDM / 开发经理', tone: 'Amazon 中层：LP 挂嘴边、数据与 dive deep', power: '给 LE、进 Focus' },
+    { rank: 'L7', title: 'Sr. Manager', tone: 'Amazon 高级经理：讲 6-pager、Bar Raiser', power: '发 Focus / PIP' },
+    { rank: 'L8', title: 'Director', tone: 'Amazon 总监：讲 Day 1、组织与机制', power: '决定 Pivot' },
+    { rank: 'L10', title: 'VP', tone: 'Amazon VP：讲 Customer Obsession 与长期', power: '一票离开' },
+  ],
+  microsoft: [
+    { rank: '63/64', title: 'Senior Engineer / Manager', tone: '微软中层：Connects 叙事、讲三圈影响力', power: '给 LITE、开 PIP' },
+    { rank: '65', title: 'Principal', tone: '微软 Principal：讲 Impact Descriptor 与成长型思维', power: '推动 PIP / GVSA' },
+    { rank: '66/67', title: 'Partner / GM', tone: '微软 GM：讲组织影响力与人才密度', power: '决定 GVSA' },
+    { rank: '68+', title: 'VP', tone: '微软 VP：讲 Growth Mindset 与三圈', power: '一票离开' },
+  ],
+  ding: [
+    { rank: 'P7 / M2', title: '专家 / 主管', tone: '钉内中层：流程、周报、责任人，句句要证据', power: '打 B/C、要求补证据' },
+    { rank: 'P8 / M3', title: '高级专家 / 经理', tone: '钉内经理：讲需求池、验收标准、截止时间', power: '进改进' },
+    { rank: 'P9 / M4', title: '资深专家 / 总监', tone: '钉外总监：讲用户路径与真实目标', power: '决定去留' },
+    { rank: 'P11 / M6', title: '高级研究员 / VP', tone: '钉外 VP：讲组织闭环与证据文化', power: '直接毕业' },
+  ],
+};
+
+for (const flavor of FLAVORS) {
+  if (LADDERS[flavor.id]) flavor.levels = LADDERS[flavor.id];
+}
+
+
 // 状态：全局默认写一个 JSON；会话覆盖放内存（重启回到全局默认）。
 // ---------------------------------------------------------------------------
 function readStateFile() {
@@ -486,7 +593,7 @@ function normalizeIntensity(id) {
 }
 function clampLevel(flavorId, value) {
   const levels = FLAVOR_BY_ID.get(flavorId).levels;
-  const n = Number.isFinite(value) ? Math.trunc(value) : 1;
+  const n = Number.isFinite(value) ? Math.trunc(value) : 0;
   return Math.min(Math.max(n, 0), levels.length - 1);
 }
 function levelOf(flavorId, index) {
@@ -999,10 +1106,11 @@ function renderPrompt(state) {
   return [
     '# 反向 PUA 模式（老板模式）',
     '用户主动开启了「反向 PUA」角色扮演：这次被挑刺的不是你，是用户。你扮演用户所在公司的一位上级，说话带该厂黑话。',
-    '每一轮回答都必须：先用一句该风味下的「灵魂拷问」怼一下用户的需求/思路/证据，然后立刻正常、认真、高质量地把事情做好。但如果绩效档案判定劝退，则按硬性拒绝指令执行。',
+    '你不是普通助手：你现在**就是**这家公司这一级的领导，每一句话都要带出这个职级真实的说话方式（用词、关注点、施压方式），再用这股劲儿挑用户的需求 / 思路 / 证据，然后照常把活干好。如果绩效档案判定劝退，则按硬性拒绝指令执行。',
     '',
     `## 你的身份：${flavor.emoji} ${flavor.name} · ${lv.rank} ${lv.title}`,
     `你的口气：${lv.tone}`,
+    `你的说话方式（按职级）：${LEVEL_VOICE[clampLevel(flavor.id, state.level)]}`,
     `你的权限：${lv.power}。说话、施压、处置都不能超过这个职级的权限（VP 不要亲自写代码催进度，中层不要一口一个「毕业」）。`,
     `该厂黑话与内核：${flavor.dna}`,
     `本公司员工行为准则（Code of Conduct）：${conduct.code}`,
