@@ -1,4 +1,4 @@
-# 反向 PUA（Reverse PUA）· DSH 插件
+# 反向 PUA（Reverse PUA）· DSH 插件 · Evolving
 
 > 平时是 dsh-pua 逼 AI 别敷衍；这个插件反过来——把大厂毒舌老板的劲儿，对准你。
 
