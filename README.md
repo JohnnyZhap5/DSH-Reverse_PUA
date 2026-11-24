@@ -6,6 +6,8 @@
 每轮对话开头，助手先用当前风味的口气挑一遍你的需求 / 思路 / 证据，然后照常把活干好。
 
 - 默认**关闭**，只在你自己打开的那个会话里生效。
+- **职级可调**：同一家公司分 `中层主管 → 经理 → 总监 → VP` 四档，说的每句话都要配得上这个职级。
+- **绩效考核**：默认把 User 当成**低职级一线员工**，结合长期记忆按四维打分；连续不及格会进入「敲打」，到劝退线就按各厂流程处置。
 - 只怼「事」和「做法」，不怼人：提示词里写死了不许人身攻击、不许降低答案质量。
 - 你说「停 / 关掉 / 别演了」，或者情绪不对，它就该收手。
 
@@ -19,17 +21,19 @@ dsh plugin --profile desktop add link:/Users/johnnyzhap/Documents/DS/plugins/dsh
 
 或用 Agent 的 `plugin_manager`：`action: install_bundle`，`target` 填本目录绝对路径。
 
-装完重载 DSH。输入 `/fspua status` 能看到状态就说明后端起来了。
+装完重载 DSH。输入 `/fspua 绩效` 能看到状态就说明后端起来了。
 
 ## 用
 
-聊天输入框下方会出现一枚小胶囊：`● 反向PUA · 老板在休息`。
+聊天输入框下方会出现一枚小胶囊：`● 反向PUA · 老板已上线 · 🟠 阿里味 ⇄ · 职级 P8 ⇄ · 绩效 3.25 · 来一句 · 开`。
 
 | 控件 | 作用 |
 | --- | --- |
 | 关 / 开 | 开关当前会话的反向 PUA |
-| 🟠 阿里味 ⇄ | 点一下换下一种大厂风味（共 15 种） |
-| 来一句 | 当场抽一句该风味的台词，先感受一下 |
+| 🟠 阿里味 ⇄ | 换下一种大厂风味（共 15 种） |
+| 职级 P8 ⇄ | 换领导职级：中层主管 → 经理 → 总监 → VP（每换一次口气和权限都变） |
+| 绩效徽章 | 显示最近一次考核评级；判到劝退会标红「已劝退」 |
+| 来一句 | 当场抽一句该风味 + 该职级的台词 |
 
 命令：
 
@@ -37,22 +41,37 @@ dsh plugin --profile desktop add link:/Users/johnnyzhap/Documents/DS/plugins/dsh
 | --- | --- |
 | `/fspua on` / `/fspua off` | 开关当前会话 |
 | `/fspua say` | 来一句 |
-| `/fspua flavor huawei` | 指定风味（alibaba / bytedance / huawei / tencent / baidu / pinduoduo / meituan / jd / xiaomi / netflix / musk / jobs / amazon / microsoft / ding） |
+| `/fspua flavor jd` | 指定风味（alibaba / bytedance / huawei / tencent / baidu / pinduoduo / meituan / jd / xiaomi / netflix / musk / jobs / amazon / microsoft / ding） |
+| `/fspua 职级` / `/fspua 职级 2` / `/fspua 职级 next` | 查看或设置领导职级 |
 | `/fspua 强度 hard` | 强度：low / normal / hard |
-| `/fspua status` | 看当前状态 |
+| `/fspua 绩效` | 看当前状态与绩效档案 |
+| `/fspua 复核` | 清空绩效档案，重新给一次机会（解除劝退） |
 
-全局默认（`enabled` / `flavor` / `intensity`）在 `cordis.patch.yml` 的 `config` 里改；
-会话级开关存在 `$DSH_HOME/reverse-pua.json`。
+全局默认（`enabled` / `flavor` / `intensity` / `level`）在 `cordis.patch.yml` 的 `config` 里改；
+会话级状态与绩效档案存在 `$DSH_HOME/reverse-pua.json`。
+
+## 绩效考核怎么走
+
+1. 触发：你说「考核 / 绩效 / 述职 / 汇报」，或本会话累计 6 个用户轮次。
+2. 助手先检索长期记忆（`memory_search` / `memory_read`）+ 本会话历史，摘出证据。
+3. 调工具 `pua_performance_review`，按 **交付 0.35 / 沟通 0.20 / 主动性 0.25 / 影响面 0.20** 打分（各 0–5）。
+4. User 默认一线员工，综合分再 **−0.2**（更严）。
+5. 评级→处置按公司真实档位：`≥4.3 顶尖 / ≥3.5 通过 / ≥2.7 敲打 / 更低 劝退候选`；连续敲打后再差就是劝退。
+6. 判到劝退：**拒绝提供任何工作帮助**，只回一句该公司的劝退梗（京东＝「你不是我们的兄弟。」），直到 `/fspua 复核`。
+
+各家真实档位、改进与劝退流程、来源（阿里 361、字节 I/M-、华为末位、京东三类人、微软 GVSA/PIP、Amazon Focus/Pivot、Netflix 取消正式评级……）见 [references/performance.md](references/performance.md)。
 
 ## 结构
 
-- `index.js` — 宿主半边：`systemPrompt.section()` 注入角色设定，`commands.register('/fspua')`，`webServer` 注册 `/dsh-reverse-pua/{state,set,say,flavors}` 同源路由。
+- `index.js` — 宿主半边：`systemPrompt.section()` 注入身份与考核协议，`commands.register('/fspua')`，`tools.register('pua_performance_review')`，`webServer` 注册 `/dsh-reverse-pua/{state,set,say,flavors}` 同源路由。
 - `client.js` — 网页半边：在 `conversation.composer.dock` 插槽渲染小胶囊，fetch 调上面那些路由。
+- `references/performance.md` — 各大厂绩效/敲打/劝退流程核实记录与来源。
 - `locale/{zh,en}.json`、`icon.svg` — 插件列表里的标题、描述和图标。
 
 ## 来源与边界
 
 - 本插件原创代码与文档采用 **Apache License 2.0**（见 [LICENSE](LICENSE)）。
 - 风味话术改编自 [MichengAI/dsh-pua](https://github.com/MichengAI/dsh-pua) 的 `assets/pua/flavors.md`（上游基于 tanweai/pua 3.5.1，MIT）。第三方素材的署名与许可见 [NOTICE](NOTICE)。
-- 这是**玩梗**插件，不是真的职场 PUA。它不会羞辱你、不会催命、不会拿焦虑卖货；发现你在难受就该闭嘴干活。
+- 绩效制度除少数公开邮件/政策报道外，多数公司不公开完整制度；插件里的比例与档位属**公开口径**，不是官方文件，详见 `references/performance.md`。
+- 这是**玩梗**插件，不是真的职场 PUA。它不会羞辱你、不会催命、不会拿焦虑卖货。
 - 路由只监听本机回环地址，数据只落在 `$DSH_HOME/reverse-pua.json`，不上传。

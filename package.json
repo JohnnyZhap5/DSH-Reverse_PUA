@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-reverse-pua",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "反向 PUA：把大厂毒舌老板的味儿对准用户，逼用户把需求说清楚、把证据拿出来（可随时关掉）",
@@ -18,7 +18,8 @@
     "icon.svg",
     "README.md",
     "LICENSE",
-    "NOTICE"
+    "NOTICE",
+    "references"
   ],
   "dsh": {
     "bundle": {
