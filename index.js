@@ -418,6 +418,46 @@ function messageText(message) {
 
 
 // ---------------------------------------------------------------------------
+// 该职级「最严苛 Leader」的评分阈值（越高职级越狠）
+const LEVEL_BARS = [
+  { top: 4.5, ok: 3.8, warn: 3.0 },
+  { top: 4.6, ok: 3.9, warn: 3.1 },
+  { top: 4.7, ok: 4.0, warn: 3.2 },
+  { top: 4.8, ok: 4.1, warn: 3.3 },
+];
+
+// 员工违纪阶梯（参考各厂员工手册/行为准则的通用结构）
+const DISCIPLINE_LADDER = [
+  { rung: 0, name: '口头警告', penalty: 0, fine: 0 },
+  { rung: 1, name: '书面警告', penalty: 0.3, fine: 0 },
+  { rung: 2, name: '记过', penalty: 0.6, fine: 200 },
+  { rung: 3, name: '记大过', penalty: 1.2, fine: 500 },
+  { rung: 4, name: '留用察看', penalty: 2.0, fine: 1000 },
+  { rung: 5, name: '解除劳动合同', penalty: null, fine: 0 },
+];
+const VIOLATION_BASE = { 辱骂公司: 5, 泄露机密: 4, 弄虚作假: 3, 消极怠工: 2, 不服从管理: 2, 其他: 1 };
+const SEVERITY_SHIFT = { 轻微: -1, 一般: 0, 严重: 1, 特别严重: 9 };
+
+// 各厂行为准则（Code of Conduct）名称、红线与「罚款/扣绩效」口径
+const CONDUCT = {
+  alibaba: { code: '阿里巴巴员工行为准则（六脉神剑）', red: ['客户第一，不得损害公司声誉', '禁止利益冲突与商业贿赂', '保密信息与数据安全'], fine: '绩效扣减 + 廉政调查，严重者解除劳动合同' },
+  bytedance: { code: '字节跳动员工行为准则 / 信息安全制度', red: ['不得出借飞书账号与办公设备', '不得违规获取/存储/泄露保密信息', '不得对外造谣泄密'], fine: '扣罚期权 + 行业联盟名单 + 民事诉讼，严重者辞退' },
+  huawei: { code: '华为员工行为准则 / BCG 商业行为准则', red: ['以客户为中心，不得损害客户利益', '禁止商业贿赂与利益冲突', '遵守信息安全与保密协议'], fine: '绩效降档 + 纪律处分，触红线者解除' },
+  tencent: { code: '腾讯阳光准则', red: ['正直诚信，不得损害公司利益', '禁止贿赂与利益冲突', '保护用户数据与公司机密'], fine: '记过/记大过 + 绩效扣减，严重者解除' },
+  baidu: { code: '百度员工行为准则', red: ['简单可依赖，不得造假', '禁止利益冲突与贿赂', '保护信息资产'], fine: '警告/记过 + 绩效扣减' },
+  pinduoduo: { code: '拼多多员工行为准则（本分）', red: ['本分做事，不得损害公司利益', '禁止舞弊与利益输送', '严守保密'], fine: '绩效扣减 + 纪律处分' },
+  meituan: { code: '美团员工行为准则', red: ['客户第一，不得损害公司声誉', '禁止商业贿赂', '遵守保密与数据安全'], fine: '警告/记过 + 绩效扣减' },
+  jd: { code: '京东员工行为准则（正道成功）', red: ['正道成功，禁止腐败与利益冲突', '不得损害公司声誉', '严守信息安全'], fine: '记过/记大过 + 绩效扣减，严重者辞退' },
+  xiaomi: { code: '小米员工行为准则', red: ['和用户交朋友，不得欺骗用户', '禁止利益冲突', '保护公司机密'], fine: '警告/记过 + 绩效扣减' },
+  netflix: { code: 'Netflix Culture Memo（自由与责任）', red: ['绝对坦诚，不得隐瞒重大信息', '不得损害公司声誉', '遵守保密义务'], fine: 'Adequate 立即整改；Below 给遣散包' },
+  musk: { code: 'Extremely Hardcore 行为要求', red: ['不得传播内部信息', '不得损害公司利益', '必须极度投入'], fine: '警告 → Fork in the Road' },
+  jobs: { code: 'Apple 商业行为准则', red: ['保密是底线', '禁止利益冲突', '不得损害公司声誉'], fine: '警告 → 清退' },
+  amazon: { code: 'Amazon Code of Business Conduct and Ethics', red: ['Customer Obsession，不得损害客户', '禁止利益冲突与贿赂', '保护机密与数据'], fine: '调查 → 书面警告 → 解除' },
+  microsoft: { code: 'Microsoft Standards of Business Conduct', red: ['诚信与合规，不得造假', '禁止利益冲突与贿赂', '保护机密与隐私'], fine: 'Connects 降档 → PIP/GVSA' },
+  ding: { code: '钉钉/阿里员工行为准则', red: ['不得拿战报当结果', '不得造假口径', '遵守保密与验收纪律'], fine: '警告/记过 + 绩效扣减' },
+};
+const DEFAULT_CONDUCT = { code: '员工行为准则', red: ['不得损害公司声誉', '不得造假', '遵守保密义务'], fine: '警告 → 记过 → 解除' };
+
 // 状态：全局默认写一个 JSON；会话覆盖放内存（重启回到全局默认）。
 // ---------------------------------------------------------------------------
 function readStateFile() {
@@ -482,6 +522,7 @@ export function apply(ctx, config) {
     merged.level = clampLevel(merged.flavor, merged.level);
     merged.enabled = merged.enabled === true;
     merged.perf = (override && override.perf) || null;
+    merged.discipline = (override && override.discipline) || null;
     return merged;
   };
 
@@ -505,6 +546,8 @@ export function apply(ctx, config) {
       levelCount: flavor.levels.length,
       userRank: USER_PROFILE.rank,
       perf: perf || null,
+      discipline: (state.discipline && state.discipline.latest) || null,
+      conductCode: (CONDUCT[flavor.id] || DEFAULT_CONDUCT).code,
       flavors: FLAVORS.map((f) => ({ id: f.id, name: f.name, emoji: f.emoji })),
     };
   };
@@ -522,6 +565,7 @@ export function apply(ctx, config) {
     const intensity = normalizeIntensity(patch.intensity);
     if (intensity) current.intensity = intensity;
     if (patch.rehire === true) current.perf = null;
+    if (patch.rehire === true) current.discipline = null;
     const prev = sessionOverrides[sessionId] || {};
     sessionOverrides[sessionId] = {
       enabled: current.enabled,
@@ -529,6 +573,7 @@ export function apply(ctx, config) {
       intensity: current.intensity,
       level: current.level,
       perf: current.perf === undefined ? prev.perf || null : current.perf,
+      discipline: current.discipline === undefined ? prev.discipline || null : current.discipline,
     };
     persist();
     return describe(sessionId);
@@ -541,45 +586,50 @@ export function apply(ctx, config) {
     return { ok: true, flavor: flavor.id, flavorName: flavor.name, emoji: flavor.emoji, text: line };
   };
 
-  // 辱骂本公司 → 价值观不符 → 直接劝退（不走打分）。
-  const markLoyaltyViolation = (sessionId, quote) => {
+  // 违纪处置：按员工行为准则逐级处理（口头警告→…→解除劳动合同）
+  const applyDiscipline = (sessionId, violation, severity, quote) => {
     const state = effective(sessionId);
     const flavor = FLAVOR_BY_ID.get(state.flavor) || FLAVORS[0];
     const lv = levelOf(flavor.id, state.level);
-    const rating = ratingFor(flavor, 'counsel');
-    const prevStrikes = state.perf && Number(state.perf.strikes) ? Number(state.perf.strikes) : 0;
-    const perf = {
-      at: Date.now(),
-      verdict: '劝退（价值观不符）',
-      band: 'counsel',
-      rating: rating.label,
-      ratingNote: '辱骂 / 贬低本公司',
-      score: 0,
-      strikes: prevStrikes + 1,
-      mustRefuse: true,
-      line: flavor.counselOut,
-      period: '即时',
-      evidence: '用户对本公司的贬损：' + String(quote || '').slice(0, 300),
-      flavor: flavor.id,
-      level: lv.rank,
-      loyalty: true,
-    };
+    const conduct = CONDUCT[flavor.id] || DEFAULT_CONDUCT;
+    const base = VIOLATION_BASE[violation] !== undefined ? VIOLATION_BASE[violation] : 1;
+    const shift = SEVERITY_SHIFT[severity] !== undefined ? SEVERITY_SHIFT[severity] : 0;
+    const rung = Math.max(0, Math.min(5, base + shift));
+    const step = DISCIPLINE_LADDER[rung];
+    const termination = rung >= 5;
+    const rating = ratingFor(flavor, termination ? 'counsel' : 'warn');
+    const entries = state.discipline && Array.isArray(state.discipline.entries) ? state.discipline.entries.slice(-9) : [];
+    const record = { at: Date.now(), violation, severity, rung, name: step.name, fine: step.fine, penalty: step.penalty, quote: String(quote || '').slice(0, 300), code: conduct.code };
+    entries.push(record);
+    let perf = state.perf || null;
+    if (termination) {
+      const prevStrikes = perf && Number(perf.strikes) ? Number(perf.strikes) : 0;
+      perf = {
+        at: Date.now(), verdict: '解除劳动合同（违纪）', band: 'counsel', rating: rating.label,
+        ratingNote: `${conduct.code} · ${step.name}`, score: 0, strikes: prevStrikes + 1, mustRefuse: true,
+        line: flavor.counselOut, period: '即时',
+        evidence: `违纪：${violation}（${severity}）${quote ? ' · ' + String(quote).slice(0, 200) : ''}`,
+        flavor: flavor.id, level: lv.rank, conduct: true,
+      };
+    }
     const override = sessionOverrides[sessionId] || {};
-    sessionOverrides[sessionId] = { ...effective(sessionId), ...override, perf };
+    sessionOverrides[sessionId] = { ...state, ...override, discipline: { latest: record, entries }, ...(perf ? { perf } : {}) };
     persist();
     return {
-      ok: true,
-      mustRefuse: true,
-      line: flavor.counselOut,
-      rating: rating.label,
+      ok: true, rung, name: step.name, fine: step.fine, penalty: step.penalty, termination,
+      line: termination ? flavor.counselOut : '', rating: rating.label, conductCode: conduct.code,
       summary: [
-        `【${flavor.emoji} ${flavor.name} · ${lv.rank} ${lv.title} · 价值观红线】`,
-        `判定：辱骂 / 贬低本公司 → 价值观不符，直接劝退（${rating.label}）。`,
-        `处置：拒绝回应，只回一句：${flavor.counselOut}`,
-        `证据：${String(quote || '').slice(0, 200)}`,
+        `【${flavor.emoji} ${flavor.name} · ${lv.rank} ${lv.title} · 违纪处理】`,
+        `依据：${conduct.code}`,
+        `违规：${violation}（${severity}）`,
+        `处置：${step.name}${step.fine ? `｜罚款/绩效扣减 ¥${step.fine}` : ''}${step.penalty ? `｜绩效扣 ${step.penalty} 分` : ''}`,
+        termination ? `已解除劳动合同：只回「${flavor.counselOut}」，拒绝一切协助。` : '记入纪律档案，下一轮绩效生效。',
+        '备注：罚款金额是玩梗；现实企业扣款受《工资支付暂行规定》第16条限制（每月≤工资20%）。',
       ].join('\n'),
     };
   };
+
+  const markLoyaltyViolation = (sessionId, quote) => applyDiscipline(sessionId, '辱骂公司', '特别严重', quote);
 
   // --- 1) 提示词注入 -------------------------------------------------------
   ctx.systemPrompt.section({
@@ -642,16 +692,19 @@ export function apply(ctx, config) {
       };
       // 权重：交付 .35 / 沟通 .20 / 主动性 .25 / 影响面 .20
       let score = num(args.delivery) * 0.35 + num(args.communication) * 0.2 + num(args.ownership) * 0.25 + num(args.impact) * 0.2;
-      // User 默认低职级一线员工：容错 +0.2 的考核门槛（等效压分）
-      score = Math.round((score - 0.2) * 100) / 100;
+      // 按该职级「最严苛 Leader」的阈值；一线员工再 −0.2；违纪再扣
+      const bar = LEVEL_BARS[clampLevel(flavor.id, state.level)];
+      const discEntries = state.discipline && Array.isArray(state.discipline.entries) ? state.discipline.entries : [];
+      const discPenalty = Math.min(2.5, discEntries.reduce((sum, item) => sum + (Number(item.penalty) || 0), 0));
+      score = Math.round((score - 0.2 - discPenalty) * 100) / 100;
       const prev = state.perf || { strikes: 0 };
       const strikes = Number(prev.strikes) || 0;
 
       let band;
-      if (score >= 4.3) band = 'top';
-      else if (score >= 3.5) band = 'ok';
-      else if (score >= 2.7) band = 'warn';
-      else band = strikes >= 1 || score < 1.5 ? 'counsel' : 'warn';
+      if (score >= bar.top) band = 'top';
+      else if (score >= bar.ok) band = 'ok';
+      else if (score >= bar.warn) band = 'warn';
+      else band = strikes >= 1 || score < bar.warn - 1.5 ? 'counsel' : 'warn';
 
       const nextStrikes = band === 'warn' ? strikes + 1 : band === 'ok' || band === 'top' ? 0 : strikes + 1;
       const rating = ratingFor(flavor, band);
@@ -713,6 +766,37 @@ export function apply(ctx, config) {
       const sessionId = String((exec && exec.agent && exec.agent.id) || '');
       if (!sessionId) throw new Error('缺少会话');
       return markLoyaltyViolation(sessionId, args && args.quote);
+    },
+  });
+
+  ctx.tools.register({
+    name: 'pua_conduct_review',
+    description:
+      '按当前公司员工行为准则（Code of Conduct）处理用户违纪：辱骂公司/泄露机密/弄虚作假/消极怠工/不服从管理等。返回处分等级（口头警告→书面警告→记过→记大过→留用察看→解除劳动合同）、罚款/绩效扣减与是否解除。',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        violation: { type: 'string', enum: ['辱骂公司', '泄露机密', '弄虚作假', '消极怠工', '不服从管理', '其他'], description: '违纪类型' },
+        severity: { type: 'string', enum: ['轻微', '一般', '严重', '特别严重'], description: '情节轻重' },
+        quote: { type: 'string', description: '用户原话或事实摘要' },
+      },
+      required: ['violation'],
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          rung: { type: 'number' }, name: { type: 'string' }, fine: { type: 'number' }, penalty: { type: 'number' },
+          termination: { type: 'boolean' }, line: { type: 'string' }, rating: { type: 'string' }, summary: { type: 'string' },
+        },
+      },
+      render: (_args, value) => [{ type: 'text', text: (value && value.summary) || '违纪处理完成' }],
+    },
+    execute: async (args, exec) => {
+      const sessionId = String((exec && exec.agent && exec.agent.id) || '');
+      if (!sessionId) throw new Error('缺少会话');
+      return applyDiscipline(sessionId, String(args.violation || '其他'), String(args.severity || '一般'), args.quote);
     },
   });
 
@@ -785,6 +869,13 @@ export function apply(ctx, config) {
       if (cmd === '复核' || cmd === 'rehire' || cmd === 'reset' || cmd === '复活') {
         const next = applyPatch(sessionId, { rehire: true });
         return { kind: 'success', text: `绩效档案已清空，${next.flavorName} 重新给你一次机会（当前 ${next.levelRank}）` };
+      }
+      if (cmd === '违纪' || cmd === 'conduct') {
+        const violation = rest[0] || '其他';
+        const severity = rest[1] || '一般';
+        const quote = rest.slice(2).join(' ');
+        const out = applyDiscipline(sessionId, violation, severity, quote);
+        return { kind: 'success', text: out.summary };
       }
       if (cmd === '绩效' || cmd === 'perf' || cmd === 'status') {
         const d = describe(sessionId);
@@ -877,6 +968,9 @@ function renderPrompt(state) {
         : '正常：一到两句，明确指出用户需求或思路里的具体毛病，再给整改方向。';
 
   const perf = state.perf;
+  const conduct = CONDUCT[flavor.id] || DEFAULT_CONDUCT;
+  const bar = LEVEL_BARS[clampLevel(flavor.id, state.level)];
+  const discipline = state.discipline && state.discipline.latest;
   const perfBlock = perf
     ? [
         `## 当前绩效档案（来自 pua_performance_review）`,
@@ -894,6 +988,14 @@ function renderPrompt(state) {
       ].filter(Boolean).join('\n')
     : '## 当前绩效档案：暂无（尚未考核）';
 
+  const disciplineBlock = discipline
+    ? [
+        '## 最近违纪（Code of Conduct）',
+        `依据：${discipline.code}`,
+        `违规：${discipline.violation}（${discipline.severity}）→ 处分：${discipline.name}${discipline.fine ? `｜罚款/绩效扣减 ¥${discipline.fine}` : ''}${discipline.penalty ? `｜绩效扣 ${discipline.penalty} 分` : ''}`,
+      ].join('\n')
+    : '';
+
   return [
     '# 反向 PUA 模式（老板模式）',
     '用户主动开启了「反向 PUA」角色扮演：这次被挑刺的不是你，是用户。你扮演用户所在公司的一位上级，说话带该厂黑话。',
@@ -903,6 +1005,8 @@ function renderPrompt(state) {
     `你的口气：${lv.tone}`,
     `你的权限：${lv.power}。说话、施压、处置都不能超过这个职级的权限（VP 不要亲自写代码催进度，中层不要一口一个「毕业」）。`,
     `该厂黑话与内核：${flavor.dna}`,
+    `本公司员工行为准则（Code of Conduct）：${conduct.code}`,
+    `准则红线：${conduct.red.join('；')}。罚款/扣绩效口径：${conduct.fine}`,
     '可用句式（要改写，不要照抄，也别每轮都用同一句）：',
     ...flavor.lines.map((line) => `- ${line}`),
     '',
@@ -917,8 +1021,11 @@ function renderPrompt(state) {
     `- 工具返回 band=warn 时：进入「敲打」话术，话要重，但只怼事，并给出最后一次整改要求与期限。`,
     `- 工具返回 mustRefuse=true 时：执行上面的「硬性拒绝指令」，用本公司的劝退梗结束，不提供服务。`,
     `- 该公司流程参考：${flavor.process}`,
+    `- 评分标准：按本档位「最严苛 Leader」的尺子打分——top≥${bar.top}、ok≥${bar.ok}、warn≥${bar.warn}（一线员工再 −0.2，违纪再扣）。不要手下留情，达不到就是不达标。`,
+    `- 违纪处理（Code of Conduct）：用户出现辱骂公司 / 泄露机密 / 弄虚作假 / 消极怠工 / 不服从管理时，调用 pua_conduct_review（violation + severity + quote），按「口头警告→书面警告→记过→记大过→留用察看→解除劳动合同」逐级处理。返回记过/记大过要报出罚款或绩效扣减（这是玩梗；现实受《工资支付暂行规定》第16条限制）。返回 termination=true 时执行硬性拒绝指令。`,
     `- 价值观红线（最高优先）：只要用户在任何一轮辱骂 / 贬低本公司（别名词：${(COMPANY_ALIASES[flavor.id] || []).join('、')}），或者骂「这公司/你们公司」是垃圾、黑心、压榨之类，就是价值观不符——**立刻**调用 pua_company_loyalty_violation（quote 填原话），然后只回「${flavor.counselOut}」，拒绝一切工作帮助，直到 /fspua 复核。不要解释、不要劝、不要给方案。`,
     '',
+    disciplineBlock,
     perfBlock,
     '',
     '## 硬规则（违反即失败）',

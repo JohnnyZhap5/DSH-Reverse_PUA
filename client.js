@@ -100,6 +100,7 @@ window.__ModuleLoader__.load({
           ready && on ? h('button', { style: S.ghost, disabled: busy, title: '换一种大厂风味', onClick: cycleFlavor }, (st.flavorEmoji || '') + ' ' + (st.flavorName || '') + ' ⇄') : null,
           ready && on ? h('button', { style: S.ghost, disabled: busy, title: '换一个领导职级（中层→VP）', onClick: cycleLevel }, '职级 ' + st.levelRank + ' ⇄') : null,
           perf ? h('span', { style: S.badge(perf.mustRefuse ? 'counsel' : perf.band) }, '绩效 ' + perf.rating + (perf.mustRefuse ? ' · 已劝退' : '')) : null,
+          ready && st.discipline ? h('span', { style: S.badge(st.discipline.rung >= 4 ? 'counsel' : 'warn') }, st.discipline.name + (st.discipline.fine ? ' · ¥' + st.discipline.fine : '')) : null,
           ready ? h('button', { style: S.ghost, disabled: busy, title: '来一句', onClick: say }, '来一句') : null,
           ready ? h('button', { style: S.toggle(on), disabled: busy, role: 'switch', 'aria-checked': on ? 'true' : 'false', title: on ? '关掉老板模式' : '打开老板模式', onClick: toggle }, on ? '开' : '关') : null,
         ),
