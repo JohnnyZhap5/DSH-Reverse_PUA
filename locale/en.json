@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Reverse PUA",
-    "description": "PUA icon sets flavor/level; #rpua-debug reports bad answers as badcases."
+    "description": "#rpua-debug feedback evolves the plugin: corrections become persistent rules injected into later turns."
   }
 }

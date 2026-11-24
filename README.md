@@ -49,6 +49,8 @@ dsh plugin --profile desktop add link:/Users/johnnyzhap/Documents/DS/plugins/dsh
 | `/fspua 强度 hard` | 强度：low / normal / hard |
 | `/fspua 绩效` | 看当前状态与绩效档案 |
 | `/fspua 违纪 <类型> [轻微/一般/严重/特别严重]` | 直接开违纪单（辱骂公司/泄露机密/弄虚作假/消极怠工/不服从管理/其他） |
+| `/fspua 进化` | 查看自进化规则（active 数 / 最近 10 条） |
+| `/fspua 进化 add <规则>` / `del <id>` / `clear` | 手动加 / 停用 / 清空规则 |
 | `/fspua badcase` | 查看 badcase 列表（open 数量 / 最近 8 条） |
 | `/fspua badcase done <id>` | 把某条 badcase 标记为 resolved |
 | `/fspua 复核` | 清空绩效与违纪档案，重新给一次机会（解除劝退） |
@@ -83,6 +85,9 @@ dsh plugin --profile desktop add link:/Users/johnnyzhap/Documents/DS/plugins/dsh
 2. 把这一轮改写成一份 **debug 工单** 交给助手：先判断是「插件口吻/职级/风味跑偏」还是「回答内容质量」问题；
 3. 如果是插件问题，助教直接改 `plugins/dsh-reverse-pua` 对应文件并用 `node --check` 校验；修不了就保留 badcase 并回「已归入 badcase <id>」。
 4. Debug 这一轮**不演 PUA**，结论先行。
+5. **自进化**：这条反馈会同时生成一条持久「进化规则」（默认作用于当前风味 + 当前职级），**立即生效**并注入之后每一轮的提示词，优先级高于示例台词。助手还会调用 `pua_evolution_rule` 把原文抱怨精炼成可执行要求（如「P9 少谈实现细节，多谈组织与人事」），旧规则标 superseded。
+
+规则存在 `$DSH_HOME/reverse-pua-evolution.json`，分三种作用域：`global`（全局）/ `flavor`（某个大厂风味）/ `level`（某风味某职级）。
 
 `#rpua-debug` 即使插件处于关闭状态也能用；模型也可以调工具 `pua_badcase_record` 主动留档。
 

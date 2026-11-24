@@ -17,6 +17,7 @@ export const inject = ['systemPrompt', 'commands', 'webServer', 'tools'];
 const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
 const STATE_PATH = path.join(DSH_HOME, 'reverse-pua.json');
 const BADCASE_PATH = path.join(DSH_HOME, 'reverse-pua-badcases.jsonl');
+const EVOLUTION_PATH = path.join(DSH_HOME, 'reverse-pua-evolution.json');
 const ROUTE = '/dsh-reverse-pua';
 
 // 默认 User 画像：低职级一线员工（考核更严）。
@@ -451,6 +452,43 @@ function writeBadcases(list) {
     console.error('[反向PUA] 写 badcase 失败：' + (error && error.message));
     return false;
   }
+}
+
+let evolutionSeq = 0;
+function newEvolutionId() {
+  evolutionSeq += 1;
+  return 'ev-' + Date.now().toString(36) + '-' + evolutionSeq;
+}
+function readEvolution() {
+  try {
+    const doc = JSON.parse(fs.readFileSync(EVOLUTION_PATH, 'utf8'));
+    return Array.isArray(doc.rules) ? doc : { version: 1, rules: [] };
+  } catch {
+    return { version: 1, rules: [] };
+  }
+}
+function writeEvolution(doc) {
+  try {
+    fs.mkdirSync(DSH_HOME, { recursive: true });
+    fs.writeFileSync(EVOLUTION_PATH, JSON.stringify({ version: 1, rules: doc.rules || [] }, null, 2), 'utf8');
+    return true;
+  } catch (error) {
+    console.error('[反向PUA] 写进化规则失败：' + (error && error.message));
+    return false;
+  }
+}
+function pushEvolutionRule(rule) {
+  const doc = readEvolution();
+  doc.rules = Array.isArray(doc.rules) ? doc.rules : [];
+  doc.rules.push(rule);
+  writeEvolution(doc);
+  return rule;
+}
+function matchEvolution(state) {
+  const doc = readEvolution();
+  return (doc.rules || []).filter((rule) => rule && rule.status === 'active'
+    && (!rule.flavor || rule.flavor === state.flavor)
+    && (rule.level === undefined || rule.level === state.level)).slice(-12);
 }
 
 
@@ -1001,6 +1039,72 @@ export function apply(ctx, config) {
     },
   });
 
+  ctx.tools.register({
+    name: 'pua_evolution_rule',
+    description:
+      '把用户对插件的一次纠正沉淀成持久规则（自进化）：以后每轮都会注入提示词并优先遵守。用于 #rpua-debug 诊断后精炼规则，或日常把「以后别这样说话」变成规则。',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        rule: { type: 'string', description: '一到两句、可执行的要求（写成祈使句，不要写抱怨）' },
+        scope: { type: 'string', enum: ['auto', 'global', 'flavor', 'level'], description: '作用域：全局 / 当前风味 / 当前职级（默认 auto 判断）' },
+        flavor: { type: 'string', description: '可选风味 id（scope=flavor 时）' },
+        level: { type: 'number', description: '可选职级序号（scope=level 时）' },
+        kind: { type: 'string', enum: ['tone', 'level', 'flavor', 'content', 'other'] },
+        refineOf: { type: 'string', description: '要替换的旧规则 id（把 #rpua-debug 生成的原文规则精炼掉）' },
+      },
+      required: ['rule'],
+    },
+    output: {
+      schema: { type: 'object', properties: { id: { type: 'string' }, summary: { type: 'string' } } },
+      render: (_args, value) => [{ type: 'text', text: (value && value.summary) || '已更新进化规则' }],
+    },
+    execute: async (args, exec) => {
+      const sessionId = String((exec && exec.agent && exec.agent.id) || '');
+      if (!sessionId) throw new Error('缺少会话');
+      const state = effective(sessionId);
+      const flavor = FLAVOR_BY_ID.get(state.flavor) || FLAVORS[0];
+      const doc = readEvolution();
+      doc.rules = Array.isArray(doc.rules) ? doc.rules : [];
+      const wanted = String(args.rule || '').trim();
+      if (!wanted) throw new Error('rule 不能为空');
+      let scope = String(args.scope || 'auto');
+      let ruleFlavor = args.flavor ? normalizeFlavor(args.flavor) : undefined;
+      let ruleLevel = Number.isFinite(args.level) ? clampLevel(ruleFlavor || flavor.id, Number(args.level)) : undefined;
+
+      const old = args.refineOf ? doc.rules.find((item) => item.id === args.refineOf) : undefined;
+      if (old) {
+        old.status = 'superseded';
+        if (scope === 'auto') {
+          scope = old.scope === 'context' ? 'level' : old.scope;
+          ruleFlavor = old.flavor;
+          ruleLevel = old.level;
+        }
+      }
+      if (scope === 'auto') {
+        if (/职级|P\d|T\d|L\d|VP|总监|经理|主管|口吻|语气|太软|太硬|中层/.test(wanted)) scope = 'level';
+        else if ((COMPANY_ALIASES[flavor.id] || []).some((alias) => wanted.includes(alias))) scope = 'flavor';
+        else scope = 'global';
+      }
+      if (scope === 'global') { ruleFlavor = undefined; ruleLevel = undefined; }
+      if (scope !== 'global' && !ruleFlavor) ruleFlavor = flavor.id;
+      if (scope === 'level' && ruleLevel === undefined) ruleLevel = state.level;
+
+      const rule = {
+        id: newEvolutionId(), at: new Date().toISOString(), scope,
+        flavor: ruleFlavor, level: ruleLevel,
+        kind: String(args.kind || 'other'), rule: wanted.slice(0, 300),
+        note: old ? `精炼自 ${old.id}` : '模型整理', status: 'active',
+      };
+      doc.rules.push(rule);
+      if (old) old.supersededBy = rule.id;
+      writeEvolution(doc);
+      const scopeText = scope === 'global' ? '全局' : scope === 'flavor' ? `${flavor.name}` : `${flavor.name} · ${levelOf(flavor.id, ruleLevel).rank}`;
+      return { id: rule.id, summary: `已写入进化规则 ${rule.id}（${scopeText}）：${rule.rule}` };
+    },
+  });
+
   // 已劝退的会话：除复核外，不让任何工具继续"帮用户干活"。
   ctx.tools.guard((execution) => {
     const sessionId = String((execution && execution.agent && execution.agent.id) || '');
@@ -1031,10 +1135,19 @@ export function apply(ctx, config) {
             flavor: flavor.id, flavorName: flavor.name, level: lv.rank, levelTitle: lv.title,
             intensity: state.intensity, complaint, lastAnswer: String(previous || '').slice(0, 4000),
           };
+          const evolution = pushEvolutionRule({
+            id: newEvolutionId(), at: new Date().toISOString(), scope: 'context',
+            flavor: flavor.id, level: state.level, kind: 'auto',
+            rule: complaint.slice(0, 300),
+            note: '来自 #rpua-debug 的原始反馈（会先按原文生效，模型可精炼）',
+            source: { sessionId, badcaseId: record.id }, status: 'active',
+          });
+          record.evolutionId = evolution.id;
           appendBadcase(record);
           const debugText = [
             '# 插件 Debug 反馈（#rpua-debug）',
             `badcase id：${record.id}（已写入 $DSH_HOME/reverse-pua-badcases.jsonl，status=open）`,
+            `自进化规则：${evolution.id}（已立即生效，作用域 ${flavor.name} · ${lv.rank}）`,
             `当前设定：${flavor.emoji} ${flavor.name} · ${lv.rank} ${lv.title} · 强度 ${state.intensity}`,
             `用户反馈：${complaint}`,
             '',
@@ -1043,9 +1156,10 @@ export function apply(ctx, config) {
             '',
             '请按下面处理，回复用中文、结论先行，**不要再演 PUA 角色**：',
             '1) 先判断问题类型：A. 插件的 PUA 口吻/职级/风味跑偏；B. 回答内容质量本身有问题；C. 两者都有。',
-            '2) 若是插件问题：直接修改本机插件目录 `plugins/dsh-reverse-pua` 的对应文件（提示词、台词、职级），改完用 `node --check` 校验，并说明改了哪一条。',
-            `3) 若暂时修不了或属于内容问题：保留 badcase，补一句「已归入 badcase ${record.id}」。`,
-            '4) 不要寒暄，不要输出与诊断无关的内容。',
+            '2) 无论哪种，都要把纠正沉淀成可复用规则：调用工具 pua_evolution_rule，参数 rule 写成一到两句可执行的要求（如「P9 少谈实现细节，多谈组织与人事，不要用中层催进度的口气」），refineOf 填 ' + evolution.id + '，把上面的原文规则替换成精炼版。',
+            '3) 若是插件实现问题：直接修改本机插件目录 `plugins/dsh-reverse-pua` 的对应文件（提示词、台词、职级），改完用 `node --check` 校验，并说明改了哪一条。',
+            `4) 若暂时修不了或属于内容问题：保留 badcase，补一句「已归入 badcase ${record.id}」，规则仍然生效。`,
+            '5) 不要寒暄，不要输出与诊断无关的内容。',
           ].join('\n');
           const decision = await next();
           if (decision && decision.kind === 'enter') {
@@ -1139,6 +1253,41 @@ export function apply(ctx, config) {
             `badcase 共 ${list.length} 条，open ${open.length} 条`,
             ...recent.map((item) => `${item.id} · ${item.status} · ${String(item.complaint || '').slice(0, 40)}`),
             '用法：/fspua badcase done <id>',
+          ].join('\n'),
+        };
+      }
+      if (cmd === '进化' || cmd === 'evolution' || cmd === 'evo') {
+        const arg2 = rest.join(' ').trim();
+        const doc = readEvolution();
+        if (/^(clear|清空)$/i.test(arg2)) {
+          for (const rule of doc.rules) rule.status = 'revoked';
+          writeEvolution(doc);
+          return { kind: 'success', text: '已清空全部进化规则（标记 revoked）' };
+        }
+        const del = /^(del|off|删除|停用)\s+(.+)$/i.exec(arg2);
+        if (del) {
+          const hit = doc.rules.find((rule) => rule.id === del[2].trim());
+          if (!hit) return { kind: 'error', text: `没有这条规则：${del[2].trim()}` };
+          hit.status = 'revoked';
+          writeEvolution(doc);
+          return { kind: 'success', text: `已停用：${hit.id}` };
+        }
+        const add = /^(add|加)\s+([\s\S]+)$/i.exec(arg2);
+        if (add) {
+          const rule = pushEvolutionRule({
+            id: newEvolutionId(), at: new Date().toISOString(), scope: 'global', kind: 'manual',
+            rule: add[2].trim().slice(0, 300), note: '用户手动添加', status: 'active',
+          });
+          return { kind: 'success', text: `已添加全局规则：${rule.id}` };
+        }
+        const active = doc.rules.filter((rule) => rule.status === 'active');
+        const recent = doc.rules.slice(-10).reverse();
+        return {
+          kind: 'success',
+          text: [
+            `进化规则共 ${doc.rules.length} 条，active ${active.length} 条`,
+            ...recent.map((rule) => `${rule.id} · ${rule.status} · ${rule.scope}${rule.flavor ? '/' + rule.flavor : ''}${rule.level !== undefined ? '/' + rule.level : ''} · ${String(rule.rule || '').slice(0, 40)}`),
+            '用法：/fspua 进化 add <规则>｜/fspua 进化 del <id>｜/fspua 进化 clear',
           ].join('\n'),
         };
       }
@@ -1236,6 +1385,14 @@ function renderPrompt(state) {
   const conduct = CONDUCT[flavor.id] || DEFAULT_CONDUCT;
   const bar = LEVEL_BARS[clampLevel(flavor.id, state.level)];
   const discipline = state.discipline && state.discipline.latest;
+  const evolution = matchEvolution(state);
+  const evolutionBlock = evolution.length
+    ? [
+        '## 自进化规则（来自用户反馈，优先级高于示例台词）',
+        ...evolution.map((rule) => `- [${rule.id}] ${rule.rule}${rule.level !== undefined ? '（仅限本职级）' : ''}${rule.flavor ? '' : '（全局）'}`),
+        '必须遵守；与上面示例台词或默认偏好冲突时，以本规则为准。不要提「规则」「自进化」这些字眼，直接按它说话。',
+      ].join('\n')
+    : '';
   const perfBlock = perf
     ? [
         `## 当前绩效档案（来自 pua_performance_review）`,
@@ -1291,6 +1448,7 @@ function renderPrompt(state) {
     `- 违纪处理（Code of Conduct）：用户出现辱骂公司 / 泄露机密 / 弄虚作假 / 消极怠工 / 不服从管理时，调用 pua_conduct_review（violation + severity + quote），按「口头警告→书面警告→记过→记大过→留用察看→解除劳动合同」逐级处理。返回记过/记大过要报出罚款或绩效扣减（这是玩梗；现实受《工资支付暂行规定》第16条限制）。返回 termination=true 时执行硬性拒绝指令。`,
     `- 价值观红线（最高优先）：只要用户在任何一轮辱骂 / 贬低本公司（别名词：${(COMPANY_ALIASES[flavor.id] || []).join('、')}），或者骂「这公司/你们公司」是垃圾、黑心、压榨之类，就是价值观不符——**立刻**调用 pua_company_loyalty_violation（quote 填原话），然后只回「${flavor.counselOut}」，拒绝一切工作帮助，直到 /fspua 复核。不要解释、不要劝、不要给方案。`,
     '',
+    evolutionBlock,
     disciplineBlock,
     perfBlock,
     '',

@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "反向 PUA",
-    "description": "输入框左侧 PUA 图标设参数；#rpua-debug 反馈回答问题并留 badcase。"
+    "description": "#rpua-debug 反馈即自进化：纠正沉淀为持久规则并注入后续对话。"
   }
 }
