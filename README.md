@@ -28,7 +28,7 @@ dsh plugin --profile desktop add link:/Users/johnnyzhap/Documents/DS/plugins/dsh
 
 ## 用
 
-聊天输入框下方会出现一枚小胶囊：`● 反向PUA · 老板已上线 · 🟠 阿里味 ⇄ · 职级 P8 ⇄ · 绩效 3.25 · 来一句 · 开`。
+新建话题后，**输入框左侧会出现一个「PUA」小喇叭图标**。点它，输入框上方展开参数面板（开关 / 风味 / 职级 / 强度 / 绩效档案 / 复核）。
 
 | 控件 | 作用 |
 | --- | --- |
@@ -71,7 +71,7 @@ dsh plugin --profile desktop add link:/Users/johnnyzhap/Documents/DS/plugins/dsh
 ## 结构
 
 - `index.js` — 宿主半边：`systemPrompt.section()` 注入身份与考核协议，`commands.register('/fspua')`，`tools.register('pua_performance_review')`，`webServer` 注册 `/dsh-reverse-pua/{state,set,say,flavors}` 同源路由。
-- `client.js` — 网页半边：在 `conversation.composer.dock` 插槽渲染小胶囊，fetch 调上面那些路由。
+- `client.js` — 网页半边：`conversation.input.left` 放 PUA 图标，`conversation.input.dock` 放展开的参数面板，fetch 调上面那些路由。
 - `references/performance.md` — 各大厂绩效/敲打/劝退流程核实记录与来源。
 - `locale/{zh,en}.json`、`icon.svg` — 插件列表里的标题、描述和图标。
 
