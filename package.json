@@ -1,0 +1,47 @@
+{
+  "name": "@local/dsh-reverse-pua",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "反向 PUA：把大厂毒舌老板的味儿对准用户，逼用户把需求说清楚、把证据拿出来（可随时关掉）",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  },
+  "license": "Apache-2.0",
+  "author": {
+    "name": "johnnyzhap"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JohnnyZhap5/DSH-Reverse_PUA.git"
+  },
+  "homepage": "https://github.com/JohnnyZhap5/DSH-Reverse_PUA#readme",
+  "bugs": {
+    "url": "https://github.com/JohnnyZhap5/DSH-Reverse_PUA/issues"
+  }
+}

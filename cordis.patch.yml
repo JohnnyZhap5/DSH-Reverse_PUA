@@ -1,0 +1,7 @@
+- insert:
+    - id: local-reverse-pua
+      name: '@local/dsh-reverse-pua'
+      config:
+        enabled: false
+        flavor: alibaba
+        intensity: normal

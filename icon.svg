@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Reverse PUA">
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5b9bd8"/>
+      <stop offset="1" stop-color="#2f6ea8"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="30" cy="34" rx="21" ry="19" fill="url(#body)"/>
+  <ellipse cx="30" cy="40" rx="15" ry="11" fill="#cfe6fb" opacity="0.55"/>
+  <path d="M49 30 l10 -6 v24 l-10 -6 z" fill="#e14b4b"/>
+  <path d="M20 21 l8 4" stroke="#16324d" stroke-width="2.6" stroke-linecap="round"/>
+  <path d="M40 21 l-8 4" stroke="#16324d" stroke-width="2.6" stroke-linecap="round"/>
+  <circle cx="24" cy="31" r="4.4" fill="#ffffff"/>
+  <circle cx="37" cy="31" r="4.4" fill="#ffffff"/>
+  <circle cx="25" cy="31.6" r="2.1" fill="#16324d"/>
+  <circle cx="36" cy="31.6" r="2.1" fill="#16324d"/>
+  <path d="M26 42 q4 -3 8 0" stroke="#16324d" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <path d="M30 46 l4 3 -4 3 -4 -3 z" fill="#e14b4b"/>
+  <path d="M30 52 l3 5 -3 3 -3 -3 z" fill="#b83232"/>
+  <circle cx="14" cy="40" r="3" fill="#8fc4ee" opacity="0.8"/>
+</svg>
