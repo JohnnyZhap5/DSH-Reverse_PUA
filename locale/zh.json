@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "反向 PUA",
-    "description": "输入框左侧 PUA 图标点开设参数：15 种风味、真实职级（中层→VP）、强度与绩效。"
+    "description": "输入框左侧 PUA 图标设参数；#rpua-debug 反馈回答问题并留 badcase。"
   }
 }

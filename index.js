@@ -16,6 +16,7 @@ export const inject = ['systemPrompt', 'commands', 'webServer', 'tools'];
 
 const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
 const STATE_PATH = path.join(DSH_HOME, 'reverse-pua.json');
+const BADCASE_PATH = path.join(DSH_HOME, 'reverse-pua-badcases.jsonl');
 const ROUTE = '/dsh-reverse-pua';
 
 // 默认 User 画像：低职级一线员工（考核更严）。
@@ -416,6 +417,42 @@ function messageText(message) {
   return content.map((block) => (block && block.type === 'text' && typeof block.text === 'string' ? block.text : '')).join('\n');
 }
 
+let badcaseSeq = 0;
+function newBadcaseId() {
+  badcaseSeq += 1;
+  return 'bc-' + Date.now().toString(36) + '-' + badcaseSeq;
+}
+function appendBadcase(record) {
+  try {
+    fs.mkdirSync(DSH_HOME, { recursive: true });
+    fs.appendFileSync(BADCASE_PATH, JSON.stringify(record) + '\n', 'utf8');
+    return true;
+  } catch (error) {
+    console.error('[反向PUA] 写 badcase 失败：' + (error && error.message));
+    return false;
+  }
+}
+function readBadcases() {
+  try {
+    const text = fs.readFileSync(BADCASE_PATH, 'utf8');
+    return text.split('\n').filter(Boolean).map((line) => {
+      try { return JSON.parse(line); } catch { return null; }
+    }).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+function writeBadcases(list) {
+  try {
+    fs.mkdirSync(DSH_HOME, { recursive: true });
+    fs.writeFileSync(BADCASE_PATH, list.map((item) => JSON.stringify(item)).join('\n') + '\n', 'utf8');
+    return true;
+  } catch (error) {
+    console.error('[反向PUA] 写 badcase 失败：' + (error && error.message));
+    return false;
+  }
+}
+
 
 // ---------------------------------------------------------------------------
 // 该职级「最严苛 Leader」的评分阈值（越高职级越狠）
@@ -693,6 +730,27 @@ export function apply(ctx, config) {
     return { ok: true, flavor: flavor.id, flavorName: flavor.name, emoji: flavor.emoji, text: line };
   };
 
+  const lastAssistantText = (agent, sessionId) => {
+    try {
+      let session = agent && agent.session;
+      if (!session) {
+        const store = ctx.get('sessions');
+        session = store && typeof store.get === 'function' ? store.get(sessionId) : undefined;
+      }
+      if (!session || typeof session.deriveMessages !== 'function') return '';
+      const messages = session.deriveMessages();
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        if (messages[i] && messages[i].role === 'assistant') {
+          const text = messageText(messages[i]);
+          if (text && text.trim()) return text;
+        }
+      }
+    } catch (error) {
+      console.error('[反向PUA] 取上一条回答失败：' + (error && error.message));
+    }
+    return '';
+  };
+
   // 违纪处置：按员工行为准则逐级处理（口头警告→…→解除劳动合同）
   const applyDiscipline = (sessionId, violation, severity, quote) => {
     const state = effective(sessionId);
@@ -907,6 +965,42 @@ export function apply(ctx, config) {
     },
   });
 
+  ctx.tools.register({
+    name: 'pua_badcase_record',
+    description:
+      '把一次「插件回答有问题」的案例记入 badcase 文件（$DSH_HOME/reverse-pua-badcases.jsonl），用于后续修插件。适合 #rpua-debug 诊断后仍无法立刻修复、或用户要求留档时调用。',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        note: { type: 'string', description: '问题描述（用户反馈 + 你的判断）' },
+        lastAnswer: { type: 'string', description: '有问题的上一条回答（可省略，工具会尽量从会话里取）' },
+        kind: { type: 'string', enum: ['tone', 'content', 'other'], description: '问题类型：口吻/职级跑偏、内容质量、其他' },
+      },
+      required: ['note'],
+    },
+    output: {
+      schema: { type: 'object', properties: { id: { type: 'string' }, summary: { type: 'string' } } },
+      render: (_args, value) => [{ type: 'text', text: (value && value.summary) || '已记录 badcase' }],
+    },
+    execute: async (args, exec) => {
+      const sessionId = String((exec && exec.agent && exec.agent.id) || '');
+      if (!sessionId) throw new Error('缺少会话');
+      const state = effective(sessionId);
+      const flavor = FLAVOR_BY_ID.get(state.flavor) || FLAVORS[0];
+      const lv = levelOf(flavor.id, state.level);
+      const record = {
+        id: newBadcaseId(), at: new Date().toISOString(), sessionId, status: 'open',
+        flavor: flavor.id, flavorName: flavor.name, level: lv.rank, levelTitle: lv.title,
+        intensity: state.intensity, complaint: String(args.note || '').slice(0, 2000),
+        kind: String(args.kind || 'other'),
+        lastAnswer: String(args.lastAnswer || lastAssistantText(exec.agent, sessionId) || '').slice(0, 4000),
+      };
+      appendBadcase(record);
+      return { id: record.id, summary: `已记录 badcase ${record.id}（${record.kind}）：${record.complaint.slice(0, 80)}` };
+    },
+  });
+
   // 已劝退的会话：除复核外，不让任何工具继续"帮用户干活"。
   ctx.tools.guard((execution) => {
     const sessionId = String((execution && execution.agent && execution.agent.id) || '');
@@ -918,20 +1012,61 @@ export function apply(ctx, config) {
     return undefined;
   });
 
-  // 兜底：进模型前扫一遍用户消息，发现辱骂本公司就记劝退（即使模型漏判）。
-  ctx.on('agent/pre-step', (payload, next) => {
+  // 进模型前：处理 #rpua-debug 前缀；否则扫辱骂公司。
+  ctx.on('agent/pre-step', async (payload, next) => {
     try {
-      const sessionId = String(payload && payload.agent && payload.agent.id || '');
+      const sessionId = String((payload && payload.agent && payload.agent.id) || '');
       if (sessionId) {
         const state = effective(sessionId);
+        const messages = payload.messages || [];
+        const debugMessage = messages.find((message) => /^#rpua-debug\b/i.test(messageText(message).trim()));
+        if (debugMessage) {
+          const raw = messageText(debugMessage).trim();
+          const complaint = raw.replace(/^#rpua-debug\b/i, '').trim() || '（未填写具体问题）';
+          const flavor = FLAVOR_BY_ID.get(state.flavor) || FLAVORS[0];
+          const lv = levelOf(flavor.id, state.level);
+          const previous = lastAssistantText(payload.agent, sessionId);
+          const record = {
+            id: newBadcaseId(), at: new Date().toISOString(), sessionId, status: 'open',
+            flavor: flavor.id, flavorName: flavor.name, level: lv.rank, levelTitle: lv.title,
+            intensity: state.intensity, complaint, lastAnswer: String(previous || '').slice(0, 4000),
+          };
+          appendBadcase(record);
+          const debugText = [
+            '# 插件 Debug 反馈（#rpua-debug）',
+            `badcase id：${record.id}（已写入 $DSH_HOME/reverse-pua-badcases.jsonl，status=open）`,
+            `当前设定：${flavor.emoji} ${flavor.name} · ${lv.rank} ${lv.title} · 强度 ${state.intensity}`,
+            `用户反馈：${complaint}`,
+            '',
+            '被反馈的上一条回答（截断）：',
+            previous ? String(previous).slice(0, 1500) : '（未取到，可能是本会话第一条）',
+            '',
+            '请按下面处理，回复用中文、结论先行，**不要再演 PUA 角色**：',
+            '1) 先判断问题类型：A. 插件的 PUA 口吻/职级/风味跑偏；B. 回答内容质量本身有问题；C. 两者都有。',
+            '2) 若是插件问题：直接修改本机插件目录 `plugins/dsh-reverse-pua` 的对应文件（提示词、台词、职级），改完用 `node --check` 校验，并说明改了哪一条。',
+            `3) 若暂时修不了或属于内容问题：保留 badcase，补一句「已归入 badcase ${record.id}」。`,
+            '4) 不要寒暄，不要输出与诊断无关的内容。',
+          ].join('\n');
+          const decision = await next();
+          if (decision && decision.kind === 'enter') {
+            return {
+              ...decision,
+              messages: decision.messages.map((message) =>
+                /^#rpua-debug\b/i.test(messageText(message).trim())
+                  ? { ...message, content: [{ type: 'text', text: debugText }] }
+                  : message),
+            };
+          }
+          return decision;
+        }
         if (state.enabled && !(state.perf && state.perf.mustRefuse)) {
           const flavor = FLAVOR_BY_ID.get(state.flavor) || FLAVORS[0];
-          const text = (payload.messages || []).map(messageText).join('\n');
+          const text = messages.map(messageText).join('\n');
           if (detectCompanyAbuse(text, flavor.id)) markLoyaltyViolation(sessionId, text.slice(0, 300));
         }
       }
     } catch (error) {
-      console.error('[反向PUA] 忠诚度检测失败：' + (error && error.message));
+      console.error('[反向PUA] pre-step 处理失败：' + (error && error.message));
     }
     return next();
   });
@@ -983,6 +1118,29 @@ export function apply(ctx, config) {
         const quote = rest.slice(2).join(' ');
         const out = applyDiscipline(sessionId, violation, severity, quote);
         return { kind: 'success', text: out.summary };
+      }
+      if (cmd === 'badcase' || cmd === 'bc') {
+        const arg2 = rest.join(' ').trim();
+        const list = readBadcases();
+        if (/^done\s+/i.test(arg2)) {
+          const id = arg2.replace(/^done\s+/i, '').trim();
+          const hit = list.find((item) => item.id === id);
+          if (!hit) return { kind: 'error', text: `没有这个 badcase：${id}` };
+          hit.status = 'resolved';
+          hit.resolvedAt = new Date().toISOString();
+          writeBadcases(list);
+          return { kind: 'success', text: `已标记 resolved：${id}` };
+        }
+        const open = list.filter((item) => item.status === 'open');
+        const recent = list.slice(-8).reverse();
+        return {
+          kind: 'success',
+          text: [
+            `badcase 共 ${list.length} 条，open ${open.length} 条`,
+            ...recent.map((item) => `${item.id} · ${item.status} · ${String(item.complaint || '').slice(0, 40)}`),
+            '用法：/fspua badcase done <id>',
+          ].join('\n'),
+        };
       }
       if (cmd === '绩效' || cmd === 'perf' || cmd === 'status') {
         const d = describe(sessionId);

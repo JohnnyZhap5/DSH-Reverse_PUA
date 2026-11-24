@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Reverse PUA",
-    "description": "Click the PUA icon left of the composer to set flavor, real job level, intensity and review."
+    "description": "PUA icon sets flavor/level; #rpua-debug reports bad answers as badcases."
   }
 }

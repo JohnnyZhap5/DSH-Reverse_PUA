@@ -49,6 +49,8 @@ dsh plugin --profile desktop add link:/Users/johnnyzhap/Documents/DS/plugins/dsh
 | `/fspua 强度 hard` | 强度：low / normal / hard |
 | `/fspua 绩效` | 看当前状态与绩效档案 |
 | `/fspua 违纪 <类型> [轻微/一般/严重/特别严重]` | 直接开违纪单（辱骂公司/泄露机密/弄虚作假/消极怠工/不服从管理/其他） |
+| `/fspua badcase` | 查看 badcase 列表（open 数量 / 最近 8 条） |
+| `/fspua badcase done <id>` | 把某条 badcase 标记为 resolved |
 | `/fspua 复核` | 清空绩效与违纪档案，重新给一次机会（解除劝退） |
 
 全局默认（`enabled` / `flavor` / `intensity` / `level`）在 `cordis.patch.yml` 的 `config` 里改；
@@ -68,9 +70,25 @@ dsh plugin --profile desktop add link:/Users/johnnyzhap/Documents/DS/plugins/dsh
 
 各家真实档位、改进与劝退流程、来源（阿里 361、字节 I/M-、华为末位、京东三类人、微软 GVSA/PIP、Amazon Focus/Pivot、Netflix 取消正式评级……）见 [references/performance.md](references/performance.md)。
 
+## Debug 入口（`#rpua-debug`）
+
+在对话输入框里直接发：
+
+```
+#rpua-debug 刚才那句太软了，不像 P9 总监
+```
+
+插件会在消息进模型前拦下来：
+1. 记录一条 badcase 到 `$DSH_HOME/reverse-pua-badcases.jsonl`（含 id、风味、职级、强度、你的反馈、上一条回答）；
+2. 把这一轮改写成一份 **debug 工单** 交给助手：先判断是「插件口吻/职级/风味跑偏」还是「回答内容质量」问题；
+3. 如果是插件问题，助教直接改 `plugins/dsh-reverse-pua` 对应文件并用 `node --check` 校验；修不了就保留 badcase 并回「已归入 badcase <id>」。
+4. Debug 这一轮**不演 PUA**，结论先行。
+
+`#rpua-debug` 即使插件处于关闭状态也能用；模型也可以调工具 `pua_badcase_record` 主动留档。
+
 ## 结构
 
-- `index.js` — 宿主半边：`systemPrompt.section()` 注入身份与考核协议，`commands.register('/fspua')`，`tools.register('pua_performance_review')`，`webServer` 注册 `/dsh-reverse-pua/{state,set,say,flavors}` 同源路由。
+- `index.js` — 宿主半边：`systemPrompt.section()` 注入身份与考核协议，`commands.register('/fspua')`，三个工具（绩效/违纪/`pua_badcase_record`），`agent/pre-step` 处理 `#rpua-debug` 与辱骂检测，`webServer` 注册 `/dsh-reverse-pua/*` 同源路由。
 - `client.js` — 网页半边：`conversation.input.left` 放 PUA 图标，`conversation.input.dock` 放展开的参数面板，fetch 调上面那些路由。
 - `references/performance.md` — 各大厂绩效/敲打/劝退流程核实记录与来源。
 - `locale/{zh,en}.json`、`icon.svg` — 插件列表里的标题、描述和图标。
