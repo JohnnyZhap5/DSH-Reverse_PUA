@@ -1,4 +1,4 @@
-# 反向 PUA（Reverse PUA）· DSH 插件 · Evolving
+# 反向 PUA（Reverse PUA）· DSH 插件 · v1.0
 
 > 平时是 dsh-pua 逼 AI 别敷衍；这个插件反过来——把大厂毒舌老板的劲儿，对准你。
 
@@ -14,50 +14,47 @@
 - 只怼「事」和「做法」，不怼人：提示词里写死了不许人身攻击、不许降低答案质量。
 - 你说「停 / 关掉 / 别演了」，或者情绪不对，它就该收手。
 
-## 版本号为什么是 Evolving
+## 自进化机制（反馈 → 规则）
 
-这个插件没有 `0.x` 这种固定版本号，**版本号就是 `Evolving`**，含义是：它靠你的反馈持续自我进化，而不是靠发版迭代。
+这个插件会**根据你的纠正持续进化**，而不是靠发版堆功能。版本号只是里程碑（当前 `1.0`），真正的「成长」存在规则里。
 
 - 你在对话里发 `#rpua-debug <纠正>`，插件会把这次纠正沉淀成一条**持久进化规则**（`$DSH_HOME/reverse-pua-evolution.json`），立即注入之后每一轮的提示词；
-- 规则分 `global / flavor / level` 三种作用域，可以积累、可以停用、可以清空（`/fspua 进化`）；
-- 所以「版本」不是一个数字，而是**当前累积的规则集合**。想看它长到哪一步，看规则列表或 git 历史即可；
-- 代码本身的变更仍然走 GitHub 提交，`git log` 就是它的变更记录。
-
+- 规则分 `global / flavor / level` 三种作用域：全局 / 某家大厂 / 某风味某职级，可积累、可停用、可清空（`/fspua 进化`）；
+- 优先级高于插件自带示例台词——你说过「P9 别像中层催进度」，它以后就不会再犯；
+- 同时会把原始反馈记进 badcase（`$DSH_HOME/reverse-pua-badcases.jsonl`），可追溯、可复核。
 
 ## 装（从 GitHub 装到本机）
 
-版本号是 `Evolving`（不是语义化版本），所以**不能**直接用 `pnpm add github:...`——pnpm 会校验版本号并报 `Invalid version: "Evolving"`。正确姿势是「克隆 + link 安装」：
+**方式 A：一行装（推荐，需要插件版本为语义化版本，本仓库 `1.0.0` 起支持）**
 
-**1) 克隆到本机**（路径随意，示例 `~/dsh-plugins`）
+```bash
+dsh plugin --profile desktop add "github:JohnnyZhap5/DSH-Reverse_PUA"
+```
+
+**方式 B：克隆 + link（想改代码或想随时 `git pull` 更新时用）**
 
 ```bash
 mkdir -p ~/dsh-plugins
 git clone https://github.com/JohnnyZhap5/DSH-Reverse_PUA.git ~/dsh-plugins/DSH-Reverse_PUA
-```
-
-**2) 装进你的 DSH profile**（`web` 或 `desktop`，按你的客户端替换）
-
-```bash
 dsh plugin --profile desktop add "link:$HOME/dsh-plugins/DSH-Reverse_PUA"
 ```
 
-**3) 重载 DSH**（重启客户端，或在插件页重载本插件），刷新页面。输入框左侧出现 `PUA` 图标即成功。
+把 `desktop` 换成你的客户端 profile（`web` 或 `desktop`）。装完**重载 DSH**（重启客户端，或在插件页重载本插件），刷新页面。输入框左侧出现 `PUA` 图标即成功。
 
 ### 让 DSH 帮你装（复制给 Agent 即可）
 
 ```text
 请帮我把 https://github.com/JohnnyZhap5/DSH-Reverse_PUA 安装到本机 DSH：
-1. git clone 到 ~/dsh-plugins/DSH-Reverse_PUA
-2. dsh plugin --profile <web|desktop> add "link:$HOME/dsh-plugins/DSH-Reverse_PUA"
-3. 检查插件是否 active，并确认输入框左侧出现 PUA 图标；没出现就提示我刷新页面
-注意：插件版本号是 Evolving（非 semver），不要用 pnpm add github:...，会报 Invalid version
+1. 运行 dsh plugin --profile <web|desktop> add "github:JohnnyZhap5/DSH-Reverse_PUA"
+   （若失败，改用：git clone 到 ~/dsh-plugins/DSH-Reverse_PUA，再 add "link:$HOME/dsh-plugins/DSH-Reverse_PUA"）
+2. 检查插件是否 active，并确认输入框左侧出现 PUA 图标；没出现就提示我刷新页面
 ```
 
-**更新**：`cd ~/dsh-plugins/DSH-Reverse_PUA && git pull`，然后在插件页重载本插件（link 安装指向这份工作副本，拉取即生效）。
+**更新**：方式 A 重跑一次 `add` 即可；方式 B 执行 `cd ~/dsh-plugins/DSH-Reverse_PUA && git pull` 后重载插件。
 
 **卸载**：`dsh plugin --profile desktop remove @local/dsh-reverse-pua`。
 
-> 本地开发同理：改完本目录后 `dsh plugin --profile desktop add "link:/绝对路径/dsh-reverse-pua"`。
+> 本地开发：改完本目录后 `dsh plugin --profile desktop add "link:/绝对路径/dsh-reverse-pua"`。
 
 ## 用
 
